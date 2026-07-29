@@ -103,7 +103,15 @@ procpulse list
 - exit code 與 termination reason
 - stdout/stderr 保存位置
 
-CLI 的 record 與輸出預設保存於 `~/.procpulse/`；可用 `PROCPULSE_HOME` 指定其他目錄。`start` 會由 background monitor 持有程序生命週期，因此 Agent 可以先啟動命令，再透過後續的 `status`、`output` 與 `stop` 命令判斷是否需要中斷。
+CLI 的 record 與輸出預設保存於「目標程序的 working directory」下的 `.procpulse/`；例如在 `/project` 執行命令，就會使用 `/project/.procpulse/`。可用 `PROCPULSE_HOME` 指定其他目錄。`start` 會由 background monitor 持有程序生命週期，因此 Agent 可以先啟動命令，再透過後續的 `status`、`output` 與 `stop` 命令判斷是否需要中斷。
+
+清理已完成或失敗的 record 與輸出檔：
+
+```bash
+procpulse clean
+```
+
+`clean` 不會刪除仍在執行中的程序資料。若 `start` 使用了 `--cwd`，後續的 `status`、`output`、`stop` 與 `clean` 應在同一個 `.procpulse` 目錄下執行，或使用相同的 `PROCPULSE_HOME`。
 
 在尚未安裝 editable package 時，也可以使用：
 

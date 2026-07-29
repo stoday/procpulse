@@ -10,7 +10,7 @@ from typing import Any
 
 
 def default_state_dir() -> Path:
-    return Path(os.environ.get("PROCPULSE_HOME", Path.home() / ".procpulse"))
+    return Path(os.environ.get("PROCPULSE_HOME", Path.cwd() / ".procpulse"))
 
 
 @dataclass
@@ -91,3 +91,17 @@ class ProcessStore:
             except (OSError, json.JSONDecodeError, TypeError):
                 continue
         return records
+
+    def clean(self) -> int:
+        """Remove records and captured output for processes no longer active."""
+        removed = 0
+        for record in self.list():
+            if record.state not in {"finished", "failed"}:
+                continue
+            for path in (self.path(record.id), Path(record.stdout_path), Path(record.stderr_path)):
+                try:
+                    path.unlink()
+                except FileNotFoundError:
+                    pass
+            removed += 1
+        return removed

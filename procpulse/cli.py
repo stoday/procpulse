@@ -27,6 +27,8 @@ def main(argv: list[str] | None = None) -> int:
         return _stop(args)
     if args.command == "list":
         return _list(args)
+    if args.command == "clean":
+        return _clean(args)
     if args.command == "_monitor":
         return _monitor(args)
     parser.print_help()
@@ -54,6 +56,7 @@ def _build_parser() -> argparse.ArgumentParser:
     stop.add_argument("--grace-period", type=float, default=2.0)
 
     subparsers.add_parser("list", help="List known processes")
+    subparsers.add_parser("clean", help="Remove records for finished processes")
 
     monitor = subparsers.add_parser("_monitor", help=argparse.SUPPRESS)
     monitor.add_argument("record_path")
@@ -73,7 +76,7 @@ def _start(args: argparse.Namespace) -> int:
         command_line[0] = sys.executable
 
     work_dir = os.path.abspath(args.cwd or os.getcwd())
-    store = ProcessStore()
+    store = ProcessStore(Path(work_dir) / ".procpulse")
     record = store.create(command_line, work_dir)
     record.grace_period = args.grace_period
     store.save(record)
@@ -184,6 +187,13 @@ def _list(args: argparse.Namespace) -> int:
         _refresh_record_state(record)
         _print_record(record)
         print()
+    return 0
+
+
+def _clean(args: argparse.Namespace) -> int:
+    del args
+    removed = ProcessStore().clean()
+    print(f"Removed {removed} finished process record(s).")
     return 0
 
 

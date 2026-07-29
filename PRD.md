@@ -46,6 +46,21 @@ manager.close(wait=True) -> None
 
 Manager 關閉後不得再啟動新程序。`close(wait=True)` 應等待受控程序完成並排空輸出；`close(wait=False)` 僅停止接受新工作並立即返回，背景清理仍會繼續。關閉 Manager 不會自動停止仍在執行的程序；需要停止程序時，呼叫端應明確使用 `stop()`。
 
+### 3.1.1 Persistent CLI
+
+CLI 必須支援跨命令呼叫管理長時間程序：
+
+```bash
+procpulse start -- COMMAND [ARGS...]
+procpulse list
+procpulse status PROCESS_ID
+procpulse output PROCESS_ID
+procpulse stop PROCESS_ID
+procpulse clean
+```
+
+`start` 應立即回傳 process ID，由 background monitor 持有程序生命週期。record 與 stdout/stderr 預設保存於目標工作目錄下的 `.procpulse/`；可用 `PROCPULSE_HOME` 覆寫。`clean` 只清理已完成或失敗的 record 與輸出，不得刪除仍在執行的程序資料。
+
 ### 3.2 ProcessObject
 
 `ProcessObject` 封裝單一外部程序的識別資料、動態狀態、事件流與最終結果。

@@ -65,9 +65,10 @@ procpulse list
 procpulse status <process_id>
 procpulse output <process_id>
 procpulse stop <process_id>
+procpulse clean
 ```
 
-Use `list` to discover persisted processes. Each record includes process ID, state, PID, uptime, effective command, working directory, exit code, termination reason, and stdout/stderr file paths. The CLI stores records and stdout/stderr files under `~/.procpulse/` by default. Set `PROCPULSE_HOME` for an isolated workspace or test run. A background monitor owns the child process and performs the platform-specific termination flow.
+Use `list` to discover persisted processes. Each record includes process ID, state, PID, uptime, effective command, working directory, exit code, termination reason, and stdout/stderr file paths. The CLI stores records and stdout/stderr files under `.procpulse/` in the target working directory by default. Set `PROCPULSE_HOME` for an isolated workspace or test run. Use `clean` to remove records and captured output for finished or failed processes; active records are preserved. A background monitor owns the child process and performs the platform-specific termination flow.
 
 ## Lifecycle rules
 
