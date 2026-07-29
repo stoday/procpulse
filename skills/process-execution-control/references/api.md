@@ -64,11 +64,14 @@ procpulse start -- python long_running.py
 procpulse list
 procpulse status <process_id>
 procpulse output <process_id>
+procpulse display <process_id_1> <process_id_2>
 procpulse stop <process_id>
 procpulse clean
 ```
 
 Use `list` to discover persisted processes. Each record includes process ID, state, PID, uptime, effective command, working directory, exit code, termination reason, and stdout/stderr file paths. The CLI stores records and stdout/stderr files under `.procpulse/` in the target working directory by default. Set `PROCPULSE_HOME` for an isolated workspace or test run. Use `clean` to remove records and captured output for finished or failed processes; active records are preserved. A background monitor owns the child process and performs the platform-specific termination flow.
+
+Use `display` to monitor several persistent processes in one foreground command. It reads existing and newly appended output, prints channel-labelled events and grouped status, displays completed processes once, and returns after all selected processes finish.
 
 ## Lifecycle rules
 

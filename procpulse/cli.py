@@ -29,6 +29,8 @@ def main(argv: list[str] | None = None) -> int:
         return _list(args)
     if args.command == "clean":
         return _clean(args)
+    if args.command == "display":
+        return _display(args)
     if args.command == "_monitor":
         return _monitor(args)
     parser.print_help()
@@ -57,6 +59,10 @@ def _build_parser() -> argparse.ArgumentParser:
 
     subparsers.add_parser("list", help="List known processes")
     subparsers.add_parser("clean", help="Remove records for finished processes")
+
+    display = subparsers.add_parser("display", help="Display output and status for processes")
+    display.add_argument("process_ids", nargs="+")
+    display.add_argument("--status-interval", type=float, default=0.5)
 
     monitor = subparsers.add_parser("_monitor", help=argparse.SUPPRESS)
     monitor.add_argument("record_path")
@@ -195,6 +201,109 @@ def _clean(args: argparse.Namespace) -> int:
     removed = ProcessStore().clean()
     print(f"Removed {removed} finished process record(s).")
     return 0
+
+
+def _display(args: argparse.Namespace) -> int:
+    if args.status_interval <= 0:
+        print("--status-interval must be greater than zero", file=sys.stderr)
+        return 2
+
+    store = ProcessStore()
+    records: list[ProcessRecord] = []
+    for process_id in args.process_ids:
+        try:
+            records.append(store.load(process_id))
+        except OSError:
+            print(f"Process not found: {process_id}", file=sys.stderr)
+            return 1
+
+    offsets = {
+        (record.id, "stdout"): 0
+        for record in records
+    }
+    offsets.update({
+        (record.id, "stderr"): 0
+        for record in records
+    })
+    next_status = 0.0
+    status_printed_after_finish = False
+
+    while True:
+        current: list[ProcessRecord] = []
+        for record in records:
+            try:
+                refreshed = store.load(record.id)
+            except OSError:
+                refreshed = record
+            _refresh_record_state(refreshed)
+            current.append(refreshed)
+            offsets[(record.id, "stdout")] = _display_output_file(
+                refreshed, "stdout", offsets[(record.id, "stdout")]
+            )
+            offsets[(record.id, "stderr")] = _display_output_file(
+                refreshed, "stderr", offsets[(record.id, "stderr")]
+            )
+
+        active = [record for record in current if record.state not in {"finished", "failed"}]
+        now = time.monotonic()
+        if active and now >= next_status:
+            _print_cli_display_status(current)
+            next_status = now + args.status_interval
+
+        if not active:
+            # Read once more after the monitor records terminal state so the
+            # final output written just before exit is not missed.
+            for record in current:
+                offsets[(record.id, "stdout")] = _display_output_file(
+                    record, "stdout", offsets[(record.id, "stdout")]
+                )
+                offsets[(record.id, "stderr")] = _display_output_file(
+                    record, "stderr", offsets[(record.id, "stderr")]
+                )
+            if not status_printed_after_finish:
+                _print_cli_display_status(current)
+                status_printed_after_finish = True
+            return 0
+
+        time.sleep(0.1)
+
+
+def _display_output_file(record: ProcessRecord, channel: str, offset: int) -> int:
+    path = Path(record.stdout_path if channel == "stdout" else record.stderr_path)
+    try:
+        with path.open(encoding="utf-8") as handle:
+            handle.seek(offset)
+            content = handle.read()
+            new_offset = handle.tell()
+    except FileNotFoundError:
+        return offset
+
+    if content:
+        for line in content.splitlines(keepends=True):
+            print(f"[{record.id}][{channel}] {line.rstrip(chr(10)).rstrip(chr(13))}", flush=True)
+    return new_offset
+
+
+def _print_cli_display_status(records: list[ProcessRecord]) -> None:
+    completed = [record for record in records if record.state in {"finished", "failed"}]
+    active = [record for record in records if record.state not in {"finished", "failed"}]
+    print("[status]", flush=True)
+    if completed:
+        print("  completed:", flush=True)
+        for record in completed:
+            _print_cli_status_line(record)
+    if active:
+        print("  active:", flush=True)
+        for record in active:
+            _print_cli_status_line(record)
+
+
+def _print_cli_status_line(record: ProcessRecord) -> None:
+    print(
+        f"    {record.id}: state={record.state}, pid={record.pid}, "
+        f"uptime={_record_uptime(record):.1f}s, cmd={' '.join(record.cmd)}",
+        flush=True,
+    )
 
 
 def _refresh_record_state(record: ProcessRecord) -> None:

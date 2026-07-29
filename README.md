@@ -82,7 +82,10 @@ procpulse status <process_id>
 ```bash
 procpulse output <process_id>
 procpulse output <process_id> --stderr
+procpulse display <process_id_1> <process_id_2>
 ```
+
+`display` 會同時讀取指定程序的 stdout/stderr 並定期顯示狀態；已完成程序只顯示一次，全部程序完成後返回。
 
 停止程序：
 

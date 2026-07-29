@@ -28,11 +28,12 @@ procpulse start -- COMMAND ARGS...
 procpulse list
 procpulse status <process_id>
 procpulse output <process_id>
+procpulse display <process_id_1> <process_id_2>
 procpulse stop <process_id>
 procpulse clean
 ```
 
-Use `list` to discover all persisted records and their state, PID, uptime, effective command, working directory, exit code, termination reason, and captured output paths. Use `clean` after a task to remove records and output for finished or failed processes; never use it as a substitute for stopping an active process. Do not use a blocking foreground command for work whose completion time is unknown unless a timeout or explicit cancellation policy is acceptable. Treat `process_id` as the handle to carry between agent steps. Read list/status and output before deciding whether a slow process is healthy, stalled, or should be stopped.
+Use `list` to discover all persisted records and their state, PID, uptime, effective command, working directory, exit code, termination reason, and captured output paths. Use `display` when several persistent processes should be observed together; it reads their saved stdout/stderr, groups completed before active status, and returns after all finish. Use `clean` after a task to remove records and output for finished or failed processes; never use it as a substitute for stopping an active process. Do not use a blocking foreground command for work whose completion time is unknown unless a timeout or explicit cancellation policy is acceptable. Treat `process_id` as the handle to carry between agent steps. Read list/status and output before deciding whether a slow process is healthy, stalled, or should be stopped.
 
 ## Public API invariants
 
