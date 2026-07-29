@@ -1,0 +1,4 @@
+interface:
+  display_name: "Process Execution Control"
+  short_description: "Safely run and control external processes"
+  default_prompt: "Use $process-execution-control to implement or debug safe external process execution in ProcPulse."

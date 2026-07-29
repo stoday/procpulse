@@ -10,6 +10,9 @@ class ProcessBackend:
     def popen_options(self) -> dict[str, Any]:
         return {}
 
+    def prepare_environment(self, env: dict[str, str] | None) -> dict[str, str] | None:
+        return env
+
     def attach(self, pid: int) -> None:
         del pid
 

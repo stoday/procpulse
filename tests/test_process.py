@@ -5,6 +5,7 @@ import time
 from io import StringIO
 from pathlib import Path
 
+import psutil
 import pytest
 
 from procpulse import (
@@ -192,6 +193,35 @@ def test_display_prints_completed_status_once_when_nothing_is_running() -> None:
     display([process], status_interval=0.01, file=output)
 
     rendered = output.getvalue()
-    assert "[process_1][stdout] done" in rendered
+    assert "[process_1][stdout] done" not in rendered
+    assert "completed:" in rendered
     assert rendered.count("[status]") == 1
+    manager.close()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Unix process-group behavior")
+def test_outer_stop_cleans_nested_procpulse_process() -> None:
+    manager = ProcessManager()
+    nested_code = (
+        "import sys, time; "
+        "from procpulse import ProcessManager; "
+        "m=ProcessManager(); "
+        "p=m.run_external_process(sys.executable, args=['-c', 'import time; time.sleep(30)']); "
+        "print(p.status.pid, flush=True); "
+        "time.sleep(30)"
+    )
+    process = manager.run_external_process(sys.executable, args=["-c", nested_code])
+    stream = process.stream
+    nested_pid = int(next(stream).text.strip())
+
+    result = manager.stop(process.id, grace_period=0.1)
+    list(stream)
+
+    for _ in range(20):
+        if not psutil.pid_exists(nested_pid):
+            break
+        time.sleep(0.05)
+
+    assert result.tree_clean is True
+    assert not psutil.pid_exists(nested_pid)
     manager.close()

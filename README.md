@@ -1,9 +1,13 @@
 # ProcPulse
 
-ProcPulse 是一個以 Python 標準函式庫為核心的跨平台外部程序管理工具。
-它提供同步事件串流、程序狀態查詢、timeout，以及受控 process tree 的停止與清理。
+ProcPulse 是一個跨平台的外部命令與程序管理工具，提供 Python API 與 CLI。
+它可以執行與監控 Python、git、ls、npm、shell script、compiled binary 等任意可執行命令，並提供同步事件串流、程序狀態查詢、timeout，以及受控 process tree 的停止與清理。
 
 目前支援 Linux、macOS 與 Windows。
+
+執行依賴包含 `psutil`，用於 Linux/macOS 的 nested process descendants 清理。
+
+ProcPulse 同時提供 Python API 與 CLI。CLI 適合需要跨多次命令呼叫觀察或停止長時間程序的情境。
 
 ## 功能
 
@@ -48,6 +52,63 @@ for event in process.stream:
 
 print(process.outcome)
 manager.close()
+```
+
+## Persistent CLI
+
+使用 `start` 在背景啟動程序；它會立即回傳 `process_id`，之後可用其他 CLI 命令查詢或停止：
+
+```bash
+procpulse start -- python long_running.py
+```
+
+它也可以執行其他命令：
+
+```bash
+procpulse start -- git status
+procpulse start -- ls -la
+procpulse start -- npm test
+procpulse start -- ./build.sh
+```
+
+查詢狀態：
+
+```bash
+procpulse status <process_id>
+```
+
+查看 stdout 或 stderr：
+
+```bash
+procpulse output <process_id>
+procpulse output <process_id> --stderr
+```
+
+停止程序：
+
+```bash
+procpulse stop <process_id> --grace-period 2
+```
+
+列出已知程序：
+
+```bash
+procpulse list
+```
+
+`list` 會列出每個被管理程序的：
+
+- process ID、state、PID、uptime
+- 實際 command 與 working directory
+- exit code 與 termination reason
+- stdout/stderr 保存位置
+
+CLI 的 record 與輸出預設保存於 `~/.procpulse/`；可用 `PROCPULSE_HOME` 指定其他目錄。`start` 會由 background monitor 持有程序生命週期，因此 Agent 可以先啟動命令，再透過後續的 `status`、`output` 與 `stop` 命令判斷是否需要中斷。
+
+在尚未安裝 editable package 時，也可以使用：
+
+```bash
+python3 -m procpulse start -- python long_running.py
 ```
 
 也可以使用文件中描述的建立函式：
@@ -217,13 +278,16 @@ process = manager.run_external_process(
 
 當 `command` 使用未帶路徑的 `python`、`python3`、`python.exe` 或
 `python3.exe` 時，ProcPulse 會自動改用目前執行 ProcPulse 的
-`sys.executable`。因此以下寫法會使用同一個虛擬環境的 Python：
+`sys.executable`。這只是 Python launcher 的便利處理，不限制其他命令；例如：
 
 ```python
 process = manager.run_external_process(
     "python",
     args=["script.py"],
 )
+
+git_process = manager.run_external_process("git", args=["status"])
+ls_process = manager.run_external_process("ls", args=["-la"])
 ```
 
 也可以將 executable 與參數放在同一個 command 字串中：
@@ -287,6 +351,29 @@ python3 -m pytest -q
 ```
 
 測試涵蓋事件流、尾端輸出、輸出限制、graceful stop、timeout、啟動失敗與 Manager 生命週期。
+
+## Codex Skill
+
+本專案也提供一個可版本控制的 Codex skill，位於：
+
+```text
+skills/process-execution-control/
+```
+
+它提供 ProcPulse 的 API 使用、外部程序生命週期、跨平台 process tree、nested process、display 與除錯指引。
+
+要安裝到 Codex 的 skills 目錄，請執行：
+
+```bash
+mkdir -p ~/.codex/skills
+cp -R skills/process-execution-control ~/.codex/skills/
+```
+
+更新 skill 時，重新執行上述複製指令即可。安裝後可在對話中使用：
+
+```text
+$process-execution-control
+```
 
 ## 限制
 

@@ -7,6 +7,12 @@ name = "procpulse"
 version = "0.1.0"
 description = "A synchronous cross-platform external process manager."
 requires-python = ">=3.10"
+dependencies = [
+    "psutil>=5.9",
+]
+
+[project.scripts]
+procpulse = "procpulse.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["procpulse*"]

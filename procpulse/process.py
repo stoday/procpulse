@@ -68,7 +68,7 @@ class ProcessObject:
         popen_options: dict[str, Any] = {
             "args": command_line,
             "cwd": cwd,
-            "env": dict(env) if env is not None else None,
+            "env": self._backend.prepare_environment(dict(env) if env is not None else None),
             "stdin": subprocess.DEVNULL,
             "stdout": subprocess.PIPE,
             "stderr": subprocess.PIPE,

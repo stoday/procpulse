@@ -2,7 +2,7 @@
 
 ## 1. 專案概述
 
-ProcPulse 是一個高可靠度、跨平台的 Python 工具庫，供開發者安全地執行與管理外部程式，例如系統指令、外部腳本與子行程。
+ProcPulse 是一個高可靠度、跨平台的 Python 工具庫與 CLI，供開發者及 Agent 安全地執行與管理任意外部命令與程序，例如 `python`、`git`、`ls`、`npm`、shell script、compiled binary 與其他子行程。
 
 第一版聚焦於三項能力：
 
