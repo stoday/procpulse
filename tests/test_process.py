@@ -36,6 +36,11 @@ def test_stream_merges_channels_and_preserves_tail_output() -> None:
     assert "err-1" in outcome.stderr
     assert outcome.termination_reason is TerminationReason.COMPLETED
     assert all(event.timestamp.tzinfo is not None for event in events)
+    rendered = outcome.to_string()
+    assert "ProcessOutcome:" in rendered
+    assert "  stdout:" in rendered
+    assert "    out-1" in rendered
+    assert str(outcome) == rendered
     manager.close()
 
 
@@ -146,11 +151,24 @@ def test_list_filters_by_state() -> None:
     manager.close()
 
 
+def test_uptime_stops_increasing_after_process_finishes() -> None:
+    manager = ProcessManager()
+    process = manager.run_external_process(sys.executable, args=["-c", "pass"])
+    process.wait(timeout=5)
+
+    first_uptime = process.status.uptime
+    time.sleep(0.05)
+    second_uptime = process.status.uptime
+
+    assert second_uptime == first_uptime
+    manager.close()
+
+
 def test_display_consumes_multiple_process_streams_and_statuses() -> None:
     manager = ProcessManager()
     processes = [
-        manager.run_external_process(sys.executable, args=["-c", "print('one', flush=True)"]),
-        manager.run_external_process(sys.executable, args=["-c", "print('two', flush=True)"]),
+        manager.run_external_process(sys.executable, args=["-c", "import time; time.sleep(.2); print('one', flush=True)"]),
+        manager.run_external_process(sys.executable, args=["-c", "import time; time.sleep(.2); print('two', flush=True)"]),
     ]
     output = StringIO()
 
@@ -160,4 +178,20 @@ def test_display_consumes_multiple_process_streams_and_statuses() -> None:
     assert "[process_1][stdout] one" in rendered
     assert "[process_2][stdout] two" in rendered
     assert "[status]" in rendered
+    assert "completed:" in rendered
+    assert "cmd=" in rendered
+    manager.close()
+
+
+def test_display_prints_completed_status_once_when_nothing_is_running() -> None:
+    manager = ProcessManager()
+    process = manager.run_external_process(sys.executable, args=["-c", "print('done', flush=True)"])
+    process.wait(timeout=5)
+    output = StringIO()
+
+    display([process], status_interval=0.01, file=output)
+
+    rendered = output.getvalue()
+    assert "[process_1][stdout] done" in rendered
+    assert rendered.count("[status]") == 1
     manager.close()

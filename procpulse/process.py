@@ -42,6 +42,7 @@ class ProcessObject:
         self._queue: queue.Queue[StreamEvent | object] = queue.Queue()
         self._lock = threading.RLock()
         self._started_at = time.monotonic()
+        self._finished_at: float | None = None
         self._finished = threading.Event()
         self._outcome: ProcessOutcome | None = None
         self._state = "starting"
@@ -99,11 +100,12 @@ class ProcessObject:
     @property
     def status(self) -> ProcessStatus:
         with self._lock:
+            ended_at = self._finished_at or time.monotonic()
             return ProcessStatus(
                 state=self._state,
                 is_alive=self._popen.poll() is None,
                 pid=self._popen.pid,
-                uptime=time.monotonic() - self._started_at,
+                uptime=ended_at - self._started_at,
                 return_code=self._popen.poll(),
                 cmd=self._cmd,
                 work_dir=self._work_dir,
@@ -180,6 +182,8 @@ class ProcessObject:
         else:
             timer = None
         self._popen.wait()
+        with self._lock:
+            self._finished_at = time.monotonic()
         for thread in self._reader_threads:
             thread.join()
         if timer is not None:

@@ -96,7 +96,17 @@ manager.display([process_1, process_2])
 manager.close()
 ```
 
-輸出會包含程序序號、channel 與定期狀態，例如 `[process_1][stdout] ...` 及 `[status] ...`。可用 `status_interval` 調整狀態更新間隔。
+輸出會包含程序序號、channel 與定期狀態。狀態會先列出已完成的程序，再列出尚在執行的程序：
+
+```text
+[status]
+  completed:
+    process_2: state=finished, alive=False, pid=123, uptime=3.0s, cmd=/path/to/python examples/hello.py
+  active:
+    process_1: state=running, alive=True, pid=122, uptime=5.5s, cmd=/path/to/python examples/hello.py
+```
+
+可用 `status_interval` 調整狀態更新間隔。
 
 若只需要顯示特定程序，也可以傳入程序清單；不傳入參數時，會顯示 Manager 目前追蹤的全部程序：
 
@@ -105,6 +115,10 @@ manager.display(status_interval=1.0)
 ```
 
 `manager.display()` 會阻塞直到指定的程序全部完成。原本的 `procpulse.display([...])` 便利函式仍然保留。
+
+當所有程序都已完成時，`manager.display()` 只會輸出一次 completed 狀態，不會繼續定時刷新；它仍會排空並顯示尚未交付的尾端事件。
+
+如果傳入的程序在呼叫 `display()` 前就已經完成，ProcPulse 只會顯示一次 completed 狀態，不會再次消費該程序的 single-consumer stream；完整輸出可從 `process.outcome.stdout` 與 `process.outcome.stderr` 取得。
 
 ## 狀態與結果
 
@@ -130,6 +144,26 @@ outcome.exit_code
 outcome.duration
 outcome.termination_reason
 outcome.output_truncated
+```
+
+`ProcessOutcome` 提供 `to_string()` 產生適合閱讀的多行結果；直接使用 `print(outcome)` 也會使用相同格式：
+
+```python
+print(process.outcome.to_string())
+```
+
+輸出範例：
+
+```text
+ProcessOutcome:
+  termination_reason: completed
+  exit_code: 0
+  duration: 0.123s
+  output_truncated: False
+  stdout:
+    hello
+  stderr:
+    (empty)
 ```
 
 `termination_reason` 可能是：
