@@ -27,6 +27,8 @@ class ProcessStatus:
     pid: int | None
     uptime: float
     return_code: int | None
+    cmd: tuple[str, ...]
+    work_dir: str
 
 
 @dataclass(frozen=True, slots=True)

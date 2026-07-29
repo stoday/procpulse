@@ -117,6 +117,8 @@ status.is_alive
 status.pid
 status.uptime
 status.return_code
+status.cmd       # 實際執行的 immutable command tuple
+status.work_dir  # 實際使用的絕對工作目錄
 ```
 
 程序結束後，`process.outcome` 會提供：

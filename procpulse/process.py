@@ -55,12 +55,14 @@ class ProcessObject:
         self._encoding = encoding
         self._errors = errors
         self._backend = create_backend()
+        self._work_dir = os.path.abspath(os.fspath(cwd)) if cwd is not None else os.getcwd()
 
         command_line = _parse_command(command, args)
         command_name = command_line[0]
         if _is_python_command(command_name):
             command_name = sys.executable
         command_line[0] = command_name
+        self._cmd = tuple(command_line)
 
         popen_options: dict[str, Any] = {
             "args": command_line,
@@ -103,6 +105,8 @@ class ProcessObject:
                 pid=self._popen.pid,
                 uptime=time.monotonic() - self._started_at,
                 return_code=self._popen.poll(),
+                cmd=self._cmd,
+                work_dir=self._work_dir,
             )
 
     @property

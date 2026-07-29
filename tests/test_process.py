@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 import time
 from io import StringIO
+from pathlib import Path
 
 import pytest
 
@@ -49,6 +50,9 @@ def test_bare_python_command_uses_current_interpreter() -> None:
 
     assert process.wait().exit_code == 0
     assert [event.text.strip() for event in events] == ["resolved"]
+    assert process.status.cmd[0] == sys.executable
+    assert process.status.cmd[1:] == ("-c", "print('resolved', flush=True)")
+    assert process.status.work_dir == str(Path.cwd())
     manager.close()
 
 

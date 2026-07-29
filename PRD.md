@@ -74,6 +74,8 @@ status 至少包含：
 - `pid`
 - `uptime`
 - `return_code`
+- `cmd`：實際執行的 immutable command tuple，包含 executable 與所有 arguments。
+- `work_dir`：實際使用的絕對工作目錄。
 
 ### 3.3 StreamEvent
 
