@@ -1,0 +1,259 @@
+# ProcPulse
+
+ProcPulse 是一個以 Python 標準函式庫為核心的跨平台外部程序管理工具。
+它提供同步事件串流、程序狀態查詢、timeout，以及受控 process tree 的停止與清理。
+
+目前支援 Linux、macOS 與 Windows。
+
+## 功能
+
+- 合併 stdout/stderr 的即時事件流，並保留輸出來源 `channel`。
+- 追蹤程序狀態、PID、執行時間與 return code。
+- 先 graceful terminate，逾時後 force kill。
+- Linux/macOS 使用 process group；Windows 優先使用 Job Object，建立或加入失敗時 fallback 到 `taskkill /T /F` 清理程序樹。
+- 可設定 timeout、工作目錄、環境變數、輸出編碼與輸出保存上限。
+- stdout 與 stderr 在最終結果中分開保存。
+
+## 安裝
+
+在專案根目錄執行：
+
+```bash
+python3 -m pip install -e .
+```
+
+如果已啟用虛擬環境，也可以使用：
+
+```bash
+python -m pip install -e .
+```
+
+需要 Python 3.10 或更新版本。
+
+## 快速開始
+
+```python
+import sys
+
+from procpulse import ProcessManager
+
+manager = ProcessManager()
+process = manager.run_external_process(
+    sys.executable,
+    args=["-c", "print('hello from ProcPulse', flush=True)"],
+)
+
+for event in process.stream:
+    print(f"[{event.channel}] {event.text.rstrip()}")
+
+print(process.outcome)
+manager.close()
+```
+
+也可以使用文件中描述的建立函式：
+
+```python
+from procpulse import process_manager
+
+manager = process_manager.build()
+```
+
+## 即時事件流
+
+`process.stream` 是同步、單次消費的 iterator。每筆事件是 `StreamEvent`，包含：
+
+```python
+event.channel    # "stdout" 或 "stderr"
+event.text       # 該行文字
+event.timestamp  # timezone-aware UTC datetime
+```
+
+stdout 與 stderr 會進入同一個事件流，但在 `process.outcome` 中仍會分開保存。
+程序結束後，iterator 會繼續交付 pipe 中尚未讀取的尾端輸出，排空後才結束。
+
+```python
+for event in process.stream:
+    if event.channel == "stderr":
+        print(f"錯誤輸出: {event.text}")
+    else:
+        print(f"一般輸出: {event.text}")
+```
+
+第一版的事件流是單次消費，不支援多個 consumer 同時訂閱同一個 stream。
+
+## 同時顯示多個程序
+
+如果需要同時顯示 Manager 管理的多個程序事件與狀態，可以使用 `manager.display()`；它會在內部並行消費各程序的 stream，直到全部程序完成：
+
+```python
+from procpulse import ProcessManager
+
+manager = ProcessManager()
+process_1 = manager.run_external_process("python examples/hello.py")
+process_2 = manager.run_external_process("python examples/hello.py")
+
+manager.display([process_1, process_2])
+manager.close()
+```
+
+輸出會包含程序序號、channel 與定期狀態，例如 `[process_1][stdout] ...` 及 `[status] ...`。可用 `status_interval` 調整狀態更新間隔。
+
+若只需要顯示特定程序，也可以傳入程序清單；不傳入參數時，會顯示 Manager 目前追蹤的全部程序：
+
+```python
+manager.display(status_interval=1.0)
+```
+
+`manager.display()` 會阻塞直到指定的程序全部完成。原本的 `procpulse.display([...])` 便利函式仍然保留。
+
+## 狀態與結果
+
+執行期間可讀取 `process.status`：
+
+```python
+status = process.status
+status.state       # starting / running / stopping / finished / failed
+status.is_alive
+status.pid
+status.uptime
+status.return_code
+```
+
+程序結束後，`process.outcome` 會提供：
+
+```python
+outcome.stdout
+outcome.stderr
+outcome.exit_code
+outcome.duration
+outcome.termination_reason
+outcome.output_truncated
+```
+
+`termination_reason` 可能是：
+
+- `completed`：程序以 exit code 0 正常完成。
+- `failed`：程序啟動失敗或以非零 exit code 結束。
+- `cancelled`：由呼叫端停止。
+- `timeout`：超過設定的執行時間。
+- `killed`：graceful termination 無效後被強制終止。
+
+## 停止程序與 timeout
+
+`stop()` 預設先等待程序自行結束，等待時間預設為 2 秒；仍未結束時，才會強制終止受控 process tree。
+
+```python
+result = manager.stop(process.id, grace_period=2.0)
+
+result.graceful
+result.force_killed
+result.tree_clean
+```
+
+也可以在啟動時設定 timeout：
+
+```python
+process = manager.run_external_process(
+    sys.executable,
+    args=["-c", "import time; time.sleep(60)"],
+    timeout=10,
+)
+```
+
+timeout 會使用相同的 graceful terminate → force kill 流程，最終結果的停止原因會是 `timeout`。
+
+## 啟動選項
+
+```python
+process = manager.run_external_process(
+    command,
+    args=None,
+    cwd=None,
+    env=None,
+    encoding="utf-8",
+    errors="replace",
+    output_limit=10 * 1024 * 1024,
+    timeout=None,
+)
+```
+
+程序預設使用 argument list、`shell=False` 與 `stdin=DEVNULL`。建議避免把未經處理的使用者輸入組成 shell command。
+
+當 `command` 使用未帶路徑的 `python`、`python3`、`python.exe` 或
+`python3.exe` 時，ProcPulse 會自動改用目前執行 ProcPulse 的
+`sys.executable`。因此以下寫法會使用同一個虛擬環境的 Python：
+
+```python
+process = manager.run_external_process(
+    "python",
+    args=["script.py"],
+)
+```
+
+也可以將 executable 與參數放在同一個 command 字串中：
+
+```python
+process = manager.run_external_process("python examples/hello.py")
+```
+
+ProcPulse 會將字串解析成 argument list，仍以 `shell=False` 執行，不會透過 shell 執行整段字串。需要精確控制參數時，仍建議使用 `command` 搭配 `args`。
+
+若指定了明確路徑，例如 `/usr/bin/python3`，ProcPulse 會保留該路徑，不會替換。
+
+`output_limit` 是 stdout 與 stderr 各自的保存上限。超過上限時，程序仍會持續讀取輸出以避免 pipe deadlock，但超出的內容不會全部保存在記憶體中，`output_truncated` 會設為 `True`。設定 `output_limit=None` 可取消保存上限，但長時間或高輸出量程序可能消耗大量記憶體。
+
+## 管理多個程序
+
+```python
+running = manager.list(filter="running")
+all_processes = manager.list()
+
+for process in running:
+    print(process.id, process.status.uptime)
+```
+
+Manager 關閉後不能啟動新程序。`close(wait=True)` 會等待已追蹤程序完成並排空輸出；關閉 Manager 不會自動停止仍在執行的程序，請先明確呼叫 `stop()`。
+
+## 錯誤處理
+
+```python
+from procpulse import (
+    ManagerClosedError,
+    ProcessNotFoundError,
+    ProcessStartError,
+)
+
+try:
+    process = manager.run_external_process("missing-command")
+except ProcessStartError as exc:
+    print(f"無法啟動程序: {exc}")
+```
+
+主要例外包括：
+
+- `ProcessStartError`：外部程序無法啟動。
+- `ProcessNotFoundError`：Manager 找不到指定的程序 ID。
+- `ManagerClosedError`：Manager 已關閉。
+- `ProcessTreeTerminationError`：無法完成受控 process tree 的終止。
+
+## 開發與測試
+
+建立 editable installation：
+
+```bash
+python3 -m pip install -e .
+```
+
+執行測試：
+
+```bash
+python3 -m pytest -q
+```
+
+測試涵蓋事件流、尾端輸出、輸出限制、graceful stop、timeout、啟動失敗與 Manager 生命週期。
+
+## 限制
+
+ProcPulse 只能保證清理它建立並控制的 process group 或 Job Object 範圍。若外部程序脫離該範圍、需要更高權限，或轉交給作業系統服務管理，清理可能失敗；此時應檢查 `StopResult.tree_clean` 與相關例外。
+
+第一版公開 API 以同步使用為主，尚未提供 async API。
