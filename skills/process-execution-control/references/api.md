@@ -1,35 +1,50 @@
 # ProcPulse API Reference
 
-## Starting a process
+## Starting commands
 
-Use any executable plus arguments, not only Python:
+`run_external_process()` accepts one complete command string or a sequence of complete command strings. It returns one `ProcessObject` per command in input order:
 
 ```python
-process = manager.run_external_process(
-    "python",
-    args=["script.py", "--verbose"],
+processes = manager.run_external_process(
+    ["python prepare.py", "python build.py"],
+    mode="sequence",
 )
-
-git_process = manager.run_external_process("git", args=["status"])
-ls_process = manager.run_external_process("ls", args=["-la"])
 ```
 
-or a command string that is parsed into argv:
+Use `mode="sequence"` to start each command only after the preceding command succeeds. Sequence is the default. A failure prevents later commands from starting; those entries finish with `state="skipped"`, no OS PID, and `termination_reason="skipped"`.
+
+Use `mode="parallel"` for independent commands:
 
 ```python
-process = manager.run_external_process("python script.py --verbose")
-git_process = manager.run_external_process("git status")
+processes = manager.run_external_process(
+    ["python lint.py", "python test.py"],
+    mode="parallel",
+)
 ```
 
-Use `shell=False` semantics. Bare `python`, `python3`, and Windows Python launcher names resolve to the current `sys.executable`; explicit interpreter paths remain unchanged. This Python-specific resolution is only a convenience and does not restrict commands to Python.
+A parallel failure does not stop sibling processes. Every returned process keeps its own ID, PID, status, stream, and outcome.
 
-Supported options include `cwd`, `env`, `encoding`, `errors`, `output_limit`, and `timeout`. `status.work_dir` records the resolved absolute working directory, and `status.cmd` records the effective immutable command tuple.
+## Start options
+
+- `command`: one command string or a sequence of command strings. Every string is parsed into argv after the complete batch passes safety preflight.
+- `mode`: `"sequence"` or `"parallel"`; defaults to `"sequence"`.
+- `cwd`: shared working directory. `None` uses the current directory; `status.work_dir` records the resolved absolute path.
+- `env`: shared child environment. `None` inherits the current environment; a mapping is the complete child environment and is not automatically merged with `os.environ`.
+- `encoding`: stdout/stderr text encoding; defaults to `"utf-8"`.
+- `errors`: stdout/stderr decoding error policy; defaults to `"replace"`.
+- `output_limit`: maximum saved bytes per process and channel; defaults to 10 MiB. Pipes continue draining after truncation. `None` removes the limit.
+- `timeout`: maximum seconds for each process, measured from its actual start. `None` disables the timeout.
+
+`shell` is not an option. ProcPulse uses argv, `shell=False`, `stdin=DEVNULL`, and stdout/stderr pipes. Unsupported shell-control tokens such as pipes, chaining, separators, and redirection fail atomic preflight with `UnsafeCommandError`; no process in that batch starts. Express the workflow as separate ProcPulse commands with sequence or parallel scheduling.
+
+Bare `python`, `python3`, and Windows Python launcher names resolve to the current `sys.executable`. Explicit interpreter paths remain unchanged.
 
 ## Stream and outcome
 
 Consume an unfinished process once:
 
 ```python
+process = processes[0]
 for event in process.stream:
     print(event.channel, event.text, event.timestamp)
 ```
@@ -43,14 +58,14 @@ outcome = process.outcome
 print(outcome.to_string())
 ```
 
-`termination_reason` values are `completed`, `failed`, `cancelled`, `timeout`, or `killed`.
+Termination reasons are `completed`, `failed`, `cancelled`, `timeout`, `killed`, and `skipped`.
 
-## Multiple processes
+## Multiple-process display
 
-Use the manager helper when several processes should be observed together:
+Pass the returned process list directly to the manager:
 
 ```python
-manager.display([process_1, process_2])
+manager.display(processes)
 ```
 
 `display()` reads unfinished streams concurrently, groups completed status before active status, and displays already-finished processes once without replaying their streams. Already-finished output remains available through `outcome.stdout` and `outcome.stderr`.
@@ -69,10 +84,8 @@ procpulse stop <process_id>
 procpulse clean
 ```
 
-Use `list` to discover persisted processes. Each record includes process ID, state, PID, uptime, effective command, working directory, exit code, termination reason, and stdout/stderr file paths. The CLI stores records and stdout/stderr files under `.procpulse/` in the target working directory by default. Set `PROCPULSE_HOME` for an isolated workspace or test run. Use `clean` to remove records and captured output for finished or failed processes; active records are preserved. A background monitor owns the child process and performs the platform-specific termination flow.
-
-Use `display` to monitor several persistent processes in one foreground command. It reads existing and newly appended output, prints channel-labelled events and grouped status, displays completed processes once, and returns after all selected processes finish.
+Each persisted record includes process ID, state, PID, uptime, effective command, working directory, exit code, termination reason, and stdout/stderr paths. Records and output default to `.procpulse/` in the target working directory; `PROCPULSE_HOME` selects another location. A background monitor owns the child process and performs platform-specific termination. `clean` removes finished or failed records and preserves active records.
 
 ## Lifecycle rules
 
-Call `manager.stop(process.id, grace_period=2.0)` to request graceful termination followed by force kill if needed. Call `manager.close()` after the manager is no longer needed. A closed manager rejects new processes.
+Call `manager.stop(process.id, grace_period=2.0)` for graceful termination followed by force kill when needed. Call `manager.close()` when the manager is no longer needed. A closed manager rejects new work; `close(wait=True)` waits for tracked processes and output draining without automatically stopping active processes.

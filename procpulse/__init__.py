@@ -6,6 +6,7 @@ from .exceptions import (
     ProcessPulseError,
     ProcessStartError,
     ProcessTreeTerminationError,
+    UnsafeCommandError,
 )
 from .display import display
 from .manager import ProcessManager, build
@@ -29,6 +30,7 @@ __all__ = [
     "ProcessStartError",
     "ProcessStatus",
     "ProcessTreeTerminationError",
+    "UnsafeCommandError",
     "StopResult",
     "StreamEvent",
     "TerminationReason",

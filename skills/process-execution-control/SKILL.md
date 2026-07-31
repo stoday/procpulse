@@ -1,6 +1,6 @@
 ---
 name: process-execution-control
-description: Implement, debug, review, and document safe cross-platform execution of arbitrary external commands and programs through ProcPulse, including stdout/stderr streaming, lifecycle management, timeouts, cancellation, process-tree cleanup, nested ProcPulse processes, display helpers, persistent CLI control, and platform backends. Use when working on ProcPulse or any task that requires observable and controllable subprocess execution.
+description: Control external processes through ProcPulse. Use when implementing, debugging, reviewing, or documenting subprocess streaming, sequence/parallel scheduling, lifecycle management, timeouts, cancellation, process-tree cleanup, persistent CLI control, or platform backends.
 ---
 
 # Process Execution Control
@@ -9,15 +9,16 @@ Use this skill when changing or diagnosing ProcPulse, or when implementing a wor
 
 ## Core workflow
 
-1. Inspect `PRD.md`, `README.md`, `dev_docs/`, the package modules, and tests before changing behavior.
-2. Preserve the public lifecycle model: `ProcessManager` creates and tracks `ProcessObject`; `ProcessObject` owns status, stream, and outcome.
-3. Keep command execution argument-based with `shell=False`. Parse a command string into argv only when required, and resolve bare `python` launchers to `sys.executable`.
-4. Drain stdout and stderr concurrently. Emit typed `StreamEvent` objects with `channel`, `text`, and UTC `timestamp`; never allow a pipe buffer to deadlock the child.
-5. Treat `stream` as a synchronous, single-consumer iterator. If a process is already finished, use `outcome.stdout` and `outcome.stderr` instead of trying to replay its stream.
-6. For stop and timeout, use graceful termination first, wait for the grace period, then force-kill the controlled process scope and wait for output draining and resource cleanup.
-7. Keep platform-specific process control behind the backend interface. Do not put Windows API details in the shared process lifecycle code.
-8. Update tests and the relevant user/developer documentation with every lifecycle or public API change.
-9. Run syntax checks and the full test suite. Report platform-specific tests that cannot run on the current operating system.
+1. Inspect `PRD.md`, `README.md`, `dev_docs/`, package modules, and tests until the affected public contract and platform constraints are identified.
+2. Preserve the lifecycle boundary: `ProcessManager` validates and schedules commands, while each `ProcessObject` owns its status, stream, stop behavior, and outcome.
+3. Preflight every command in a batch before creating any subprocess. Reject unsupported shell-control tokens with `UnsafeCommandError`, parse accepted strings into argv, resolve bare Python launchers to `sys.executable`, and execute with `shell=False`.
+4. Preserve scheduling semantics: sequence starts the next process only after success and marks later entries `skipped` after failure; parallel starts every validated command and leaves sibling lifecycles independent.
+5. Drain stdout and stderr concurrently. Emit typed `StreamEvent` objects with `channel`, `text`, and UTC `timestamp`; never allow a pipe buffer to deadlock the child.
+6. Treat `stream` as a synchronous, single-consumer iterator. If a process is already finished, use `outcome.stdout` and `outcome.stderr` instead of trying to replay its stream.
+7. For stop and timeout, use graceful termination first, wait for the grace period, then force-kill the controlled process scope and wait for output draining and resource cleanup.
+8. Keep platform-specific process control behind the backend interface. Keep Windows API details out of the shared process lifecycle code.
+9. Update tests and the relevant user/developer documentation with every lifecycle or public API change.
+10. Run syntax checks and the full test suite. Work is complete when affected public behaviors pass, stale API examples are removed, and unavailable platform-specific checks are reported.
 
 ## Agent-operated long-running commands
 
@@ -37,10 +38,13 @@ Use `list` to discover all persisted records and their state, PID, uptime, effec
 
 ## Public API invariants
 
+- `ProcessManager.run_external_process()` accepts one command string or a sequence of command strings and returns one `ProcessObject` per command in input order.
+- `mode="sequence"` is the default; `mode="parallel"` must be explicit.
 - `ProcessManager.list()` returns tracked processes and can filter by status state.
 - `ProcessManager.display()` consumes only unfinished processes and prints completed processes once; it blocks until active processes finish.
 - `ProcessStatus` exposes `state`, `is_alive`, `pid`, `uptime`, `return_code`, `cmd`, and `work_dir`.
 - `ProcessOutcome` exposes separated stdout/stderr, exit code, duration, termination reason, truncation state, and `to_string()` for readable multiline output.
+- Pending commands have no OS PID. Sequence commands prevented from starting have `state="skipped"` and `termination_reason="skipped"`.
 - A process ID is a ProcPulse identifier, not the operating-system PID.
 - `outcome` is the final result; do not infer completion solely from `status.is_alive` while output draining is still in progress.
 
@@ -56,6 +60,8 @@ When a requested behavior conflicts with the PRD, identify the conflict and upda
 ## Validation checklist
 
 - Test normal completion with stdout, stderr, no output, and non-zero exit code.
+- Test atomic command preflight, forbidden shell tokens, invalid modes, and bare Python resolution.
+- Test sequence order and skipped entries after failure; test parallel overlap and sibling independence.
 - Test output tail draining and output-limit truncation.
 - Test graceful stop, timeout, force kill, repeated stop, and unknown process IDs.
 - Test `manager.display()` with active processes, already-finished processes, and mixed active/completed lists.

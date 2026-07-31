@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import shlex
 import time
 from io import StringIO
 from pathlib import Path
@@ -18,15 +19,20 @@ from procpulse import (
 )
 
 
+def python_command(source: str) -> str:
+    return shlex.join(["python", "-c", f"exec({source!r})"])
+
+
 def test_stream_merges_channels_and_preserves_tail_output() -> None:
     manager = ProcessManager()
     process = manager.run_external_process(
-        sys.executable,
-        args=[
-            "-c",
-            "import sys; print('out-1', flush=True); print('err-1', file=sys.stderr, flush=True); print('out-2', end='')",
-        ],
-    )
+        python_command(
+            "import sys\n"
+            "print('out-1', flush=True)\n"
+            "print('err-1', file=sys.stderr, flush=True)\n"
+            "print('out-2', end='')"
+        )
+    )[0]
 
     events = list(process.stream)
     outcome = process.wait()
@@ -47,10 +53,7 @@ def test_stream_merges_channels_and_preserves_tail_output() -> None:
 
 def test_bare_python_command_uses_current_interpreter() -> None:
     manager = ProcessManager()
-    process = manager.run_external_process(
-        "python",
-        args=["-c", "print('resolved', flush=True)"],
-    )
+    process = manager.run_external_process("python -c \"print('resolved', flush=True)\"")[0]
 
     events = list(process.stream)
 
@@ -64,9 +67,7 @@ def test_bare_python_command_uses_current_interpreter() -> None:
 
 def test_command_string_can_include_arguments() -> None:
     manager = ProcessManager()
-    process = manager.run_external_process(
-        "python -c \"print('inline command', flush=True)\"",
-    )
+    process = manager.run_external_process("python -c \"print('inline command', flush=True)\"")[0]
 
     events = list(process.stream)
 
@@ -78,10 +79,9 @@ def test_command_string_can_include_arguments() -> None:
 def test_output_limit_does_not_stop_pipe_draining() -> None:
     manager = ProcessManager()
     process = manager.run_external_process(
-        sys.executable,
-        args=["-c", "print('x' * 10000)"],
+        "python -c \"print('x' * 10000)\"",
         output_limit=32,
-    )
+    )[0]
 
     list(process.stream)
     outcome = process.wait()
@@ -94,10 +94,7 @@ def test_output_limit_does_not_stop_pipe_draining() -> None:
 
 def test_stop_uses_graceful_termination_before_force_kill() -> None:
     manager = ProcessManager()
-    process = manager.run_external_process(
-        sys.executable,
-        args=["-c", "import time; time.sleep(30)"],
-    )
+    process = manager.run_external_process(python_command("import time\ntime.sleep(30)"))[0]
 
     result = manager.stop(process.id, grace_period=1.0)
     outcome = process.wait()
@@ -111,10 +108,9 @@ def test_stop_uses_graceful_termination_before_force_kill() -> None:
 def test_timeout_records_timeout_reason() -> None:
     manager = ProcessManager()
     process = manager.run_external_process(
-        sys.executable,
-        args=["-c", "import time; time.sleep(30)"],
+        python_command("import time\ntime.sleep(30)"),
         timeout=0.05,
-    )
+    )[0]
 
     outcome = process.wait(timeout=5)
 
@@ -139,12 +135,12 @@ def test_manager_rejects_unknown_id_and_new_work_after_close() -> None:
 
     manager.close()
     with pytest.raises(ManagerClosedError):
-        manager.run_external_process(sys.executable, args=["-c", "pass"])
+        manager.run_external_process("python -c pass")
 
 
 def test_list_filters_by_state() -> None:
     manager = ProcessManager()
-    process = manager.run_external_process(sys.executable, args=["-c", "pass"])
+    process = manager.run_external_process("python -c pass")[0]
     process.wait(timeout=5)
 
     assert process in manager.list(filter="finished")
@@ -154,7 +150,7 @@ def test_list_filters_by_state() -> None:
 
 def test_uptime_stops_increasing_after_process_finishes() -> None:
     manager = ProcessManager()
-    process = manager.run_external_process(sys.executable, args=["-c", "pass"])
+    process = manager.run_external_process("python -c pass")[0]
     process.wait(timeout=5)
 
     first_uptime = process.status.uptime
@@ -168,8 +164,8 @@ def test_uptime_stops_increasing_after_process_finishes() -> None:
 def test_display_consumes_multiple_process_streams_and_statuses() -> None:
     manager = ProcessManager()
     processes = [
-        manager.run_external_process(sys.executable, args=["-c", "import time; time.sleep(.2); print('one', flush=True)"]),
-        manager.run_external_process(sys.executable, args=["-c", "import time; time.sleep(.2); print('two', flush=True)"]),
+        manager.run_external_process(python_command("import time\ntime.sleep(.2)\nprint('one', flush=True)"))[0],
+        manager.run_external_process(python_command("import time\ntime.sleep(.2)\nprint('two', flush=True)"))[0],
     ]
     output = StringIO()
 
@@ -186,7 +182,7 @@ def test_display_consumes_multiple_process_streams_and_statuses() -> None:
 
 def test_display_prints_completed_status_once_when_nothing_is_running() -> None:
     manager = ProcessManager()
-    process = manager.run_external_process(sys.executable, args=["-c", "print('done', flush=True)"])
+    process = manager.run_external_process("python -c \"print('done', flush=True)\"")[0]
     process.wait(timeout=5)
     output = StringIO()
 
@@ -202,15 +198,16 @@ def test_display_prints_completed_status_once_when_nothing_is_running() -> None:
 @pytest.mark.skipif(sys.platform == "win32", reason="Unix process-group behavior")
 def test_outer_stop_cleans_nested_procpulse_process() -> None:
     manager = ProcessManager()
+    nested_command = python_command("import time\ntime.sleep(30)")
     nested_code = (
-        "import sys, time; "
-        "from procpulse import ProcessManager; "
-        "m=ProcessManager(); "
-        "p=m.run_external_process(sys.executable, args=['-c', 'import time; time.sleep(30)']); "
-        "print(p.status.pid, flush=True); "
+        "import sys, time\n"
+        "from procpulse import ProcessManager\n"
+        "m = ProcessManager()\n"
+        f"p = m.run_external_process({nested_command!r})[0]\n"
+        "print(p.status.pid, flush=True)\n"
         "time.sleep(30)"
     )
-    process = manager.run_external_process(sys.executable, args=["-c", nested_code])
+    process = manager.run_external_process(python_command(nested_code))[0]
     stream = process.stream
     nested_pid = int(next(stream).text.strip())
 

@@ -43,9 +43,8 @@ from procpulse import ProcessManager
 
 manager = ProcessManager()
 process = manager.run_external_process(
-    sys.executable,
-    args=["-c", "print('hello from ProcPulse', flush=True)"],
-)
+    "python -c \"print('hello from ProcPulse', flush=True)\"",
+)[0]
 
 for event in process.stream:
     print(f"[{event.channel}] {event.text.rstrip()}")
@@ -153,6 +152,33 @@ for event in process.stream:
 
 第一版的事件流是單次消費，不支援多個 consumer 同時訂閱同一個 stream。
 
+## 批次執行
+
+`run_external_process()` 接受單一完整命令字串或多個命令字串。每個命令會對應一個獨立的 `ProcessObject`，回傳值是依輸入順序排列的 process 清單：
+
+```python
+processes = manager.run_external_process(
+    ["python prepare.py", "python build.py"],
+    mode="sequence",
+)
+```
+
+`mode` 預設為 `"sequence"`。sequence 只有在前一個程序成功後才會啟動下一個；如果其中一個程序失敗，後續命令會標記為 `skipped`，不會建立 subprocess。
+
+需要同時執行互相獨立的命令時，指定 `mode="parallel"`：
+
+```python
+processes = manager.run_external_process(
+    ["python lint.py", "python test.py"],
+    mode="parallel",
+)
+manager.display(processes)
+```
+
+parallel 中某個程序失敗不會自動停止其他程序。每個 process 的 `status`、`stream`、PID 與 `outcome` 都保持獨立。
+
+所有命令會在啟動前先完成安全預檢。ProcPulse 不支援在命令字串中使用 pipe、命令串接、重導向或其他 shell 控制語法，例如 `|`、`&&`、`||`、`;`、`>`、`<`。即使 token 位於引號中也會拒絕，並拋出 `UnsafeCommandError`；請將命令拆開交給 ProcPulse，以 sequence 或 parallel 表達工作流。
+
 ## 同時顯示多個程序
 
 如果需要同時顯示 Manager 管理的多個程序事件與狀態，可以使用 `manager.display()`；它會在內部並行消費各程序的 stream，直到全部程序完成：
@@ -161,10 +187,12 @@ for event in process.stream:
 from procpulse import ProcessManager
 
 manager = ProcessManager()
-process_1 = manager.run_external_process("python examples/hello.py")
-process_2 = manager.run_external_process("python examples/hello.py")
+processes = manager.run_external_process(
+    ["python examples/hello.py", "python examples/hello.py"],
+    mode="parallel",
+)
 
-manager.display([process_1, process_2])
+manager.display(processes)
 manager.close()
 ```
 
@@ -262,10 +290,9 @@ result.tree_clean
 
 ```python
 process = manager.run_external_process(
-    sys.executable,
-    args=["-c", "import time; time.sleep(60)"],
+    "python -c \"import time; time.sleep(60)\"",
     timeout=10,
-)
+)[0]
 ```
 
 timeout 會使用相同的 graceful terminate → force kill 流程，最終結果的停止原因會是 `timeout`。
@@ -273,9 +300,9 @@ timeout 會使用相同的 graceful terminate → force kill 流程，最終結�
 ## 啟動選項
 
 ```python
-process = manager.run_external_process(
+processes = manager.run_external_process(
     command,
-    args=None,
+    mode="sequence",
     cwd=None,
     env=None,
     encoding="utf-8",
@@ -285,33 +312,41 @@ process = manager.run_external_process(
 )
 ```
 
-程序預設使用 argument list、`shell=False` 與 `stdin=DEVNULL`。建議避免把未經處理的使用者輸入組成 shell command。
+參數說明：
+
+- `command`：單一完整命令字串，或由多個完整命令字串組成的 sequence。單一字串也會回傳只含一個 `ProcessObject` 的清單；多個命令的回傳順序與輸入順序相同。所有命令會先通過安全預檢，再解析成 argument list。
+- `mode`：批次排程方式，允許 `"sequence"` 或 `"parallel"`，預設為 `"sequence"`。sequence 會等待前一個命令成功後才啟動下一個；失敗後尚未啟動的命令會標記為 `skipped`。parallel 會啟動所有命令，單一程序失敗不會自動停止其他程序。
+- `cwd`：所有命令共用的工作目錄，可傳入字串、path-like object 或 `None`。`None` 表示使用目前工作目錄；`ProcessStatus.work_dir` 會保存實際使用的絕對路徑。
+- `env`：所有命令共用的 child-process environment mapping。`None` 表示繼承目前程序的環境；傳入 mapping 時會將它作為 child process 的完整環境，不會自動與 `os.environ` 合併。
+- `encoding`：stdout 與 stderr 的文字解碼編碼，預設為 `"utf-8"`。
+- `errors`：stdout 與 stderr 解碼錯誤的處理策略，直接傳給 Python 的文字解碼器，預設為 `"replace"`。
+- `output_limit`：每個程序、每個 channel 各自保存的最大 byte 數，預設為 10 MiB。超過上限後仍會持續排空 pipe，以避免 subprocess deadlock，但超出的內容不會完整保留，且 `ProcessOutcome.output_truncated` 會是 `True`。設為 `None` 可取消上限。
+- `timeout`：每個程序從實際啟動起計算的最長執行秒數。`None` 表示不限制；逾時時會先 graceful terminate，超過 grace period 後再 force kill 受控 process tree，最終 termination reason 為 `timeout`。
+
+回傳值為 `list[ProcessObject]`。每個元素分別提供自己的 `id`、`status`、`stream`、`wait()`、`stop()` 與 `outcome`。
+
+`shell` 不是公開啟動選項。ProcPulse 固定使用 argument list、`shell=False` 與 `stdin=DEVNULL`，並將 stdout/stderr 設為 pipe 以供串流與結果保存。這項限制讓 ProcPulse 能清楚管理每個 subprocess、輸出 channel 與 process tree。
 
 當 `command` 使用未帶路徑的 `python`、`python3`、`python.exe` 或
 `python3.exe` 時，ProcPulse 會自動改用目前執行 ProcPulse 的
 `sys.executable`。這只是 Python launcher 的便利處理，不限制其他命令；例如：
 
 ```python
-process = manager.run_external_process(
-    "python",
-    args=["script.py"],
+processes = manager.run_external_process(
+    ["python script.py", "git status", "ls -la"],
+    mode="sequence",
 )
-
-git_process = manager.run_external_process("git", args=["status"])
-ls_process = manager.run_external_process("ls", args=["-la"])
 ```
 
 也可以將 executable 與參數放在同一個 command 字串中：
 
 ```python
-process = manager.run_external_process("python examples/hello.py")
+process = manager.run_external_process("python examples/hello.py")[0]
 ```
 
-ProcPulse 會將字串解析成 argument list，仍以 `shell=False` 執行，不會透過 shell 執行整段字串。需要精確控制參數時，仍建議使用 `command` 搭配 `args`。
+ProcPulse 會將字串解析成 argument list，仍以 `shell=False` 執行，不會透過 shell 執行整段字串。命令字串中的 shell 控制語法（例如 `|`、`&&`、`||`、`;`、`>`、`<`）會被拒絕，即使它們出現在引號內也一樣。需要串接或平行執行時，請將每個命令分開傳入，並使用 `mode="sequence"` 或 `mode="parallel"`。
 
 若指定了明確路徑，例如 `/usr/bin/python3`，ProcPulse 會保留該路徑，不會替換。
-
-`output_limit` 是 stdout 與 stderr 各自的保存上限。超過上限時，程序仍會持續讀取輸出以避免 pipe deadlock，但超出的內容不會全部保存在記憶體中，`output_truncated` 會設為 `True`。設定 `output_limit=None` 可取消保存上限，但長時間或高輸出量程序可能消耗大量記憶體。
 
 ## 管理多個程序
 
@@ -332,6 +367,7 @@ from procpulse import (
     ManagerClosedError,
     ProcessNotFoundError,
     ProcessStartError,
+    UnsafeCommandError,
 )
 
 try:
@@ -346,6 +382,7 @@ except ProcessStartError as exc:
 - `ProcessNotFoundError`：Manager 找不到指定的程序 ID。
 - `ManagerClosedError`：Manager 已關閉。
 - `ProcessTreeTerminationError`：無法完成受控 process tree 的終止。
+- `UnsafeCommandError`：命令包含 ProcPulse 不支援的 shell 控制語法。
 
 ## 開發與測試
 

@@ -14,5 +14,9 @@ class ProcessStartError(ProcessPulseError):
     """Raised when an external process cannot be started."""
 
 
+class UnsafeCommandError(ProcessPulseError):
+    """Raised when a command contains unsupported shell control syntax."""
+
+
 class ProcessTreeTerminationError(ProcessPulseError):
     """Raised when a controlled process tree cannot be fully stopped."""

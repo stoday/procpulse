@@ -28,7 +28,7 @@ ProcPulse 是一個高可靠度、跨平台的 Python 工具庫與 CLI，供開�
 
 ```python
 process_manager.build() -> ProcessManager
-manager.run_external_process(command, args=None, **options) -> ProcessObject
+manager.run_external_process(command: str | list[str], mode="sequence", **options) -> list[ProcessObject]
 manager.list(filter=None) -> list[ProcessObject]
 manager.stop(process_id, grace_period=2.0) -> StopResult
 manager.close(wait=True) -> None
@@ -43,6 +43,10 @@ manager.close(wait=True) -> None
 - `encoding` 與 `errors`：輸出解碼策略。
 - `output_limit`：stdout/stderr 各自的保存上限。
 - `timeout`：程序最長執行時間。
+
+`run_external_process()` 接受單一完整命令字串或命令字串集合，並回傳各命令對應的獨立 `ProcessObject`。`mode` 可為 `sequence` 或 `parallel`，預設為 `sequence`。sequence 在前一命令成功後才啟動下一命令；前一命令失敗時，後續命令標記為 `skipped`。parallel 中各命令互不影響。
+
+所有命令在任何 subprocess 啟動前完成安全預檢。pipe、命令串接、分隔符與輸出重導向等 shell 控制語法會依平台規則拒絕，即使 token 位於引號內也不例外；此時拋出 `UnsafeCommandError`。ProcPulse 不自動啟用 shell，使用者應將命令拆開交由 sequence 或 parallel 管理。
 
 Manager 關閉後不得再啟動新程序。`close(wait=True)` 應等待受控程序完成並排空輸出；`close(wait=False)` 僅停止接受新工作並立即返回，背景清理仍會繼續。關閉 Manager 不會自動停止仍在執行的程序；需要停止程序時，呼叫端應明確使用 `stop()`。
 
@@ -76,11 +80,13 @@ process_obj.outcome  # 程序結束後可取得的結果
 
 狀態至少包括：
 
+- `pending`
 - `starting`
 - `running`
 - `stopping`
 - `finished`
 - `failed`
+- `skipped`
 
 status 至少包含：
 
@@ -199,11 +205,11 @@ manager.stop(process_id, grace_period=2.0)
 from my_toolkit import process_manager
 
 manager = process_manager.build()
-process_obj = manager.run_external_process(
-    "python",
-    args=["long_running_script.py", "--parallel"],
+processes = manager.run_external_process(
+    "python long_running_script.py --parallel",
     timeout=300,
 )
+process_obj = processes[0]
 
 print(f"已啟動程序，ID 為: {process_obj.id}")
 

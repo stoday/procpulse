@@ -1,15 +1,14 @@
 from procpulse import ProcessManager
 
 manager = ProcessManager()
-process_1 = manager.run_external_process(
-    'python examples/hello.py'
+processes = manager.run_external_process(
+    ['python examples/hello.py', 'git status'],
+    mode='parallel',
 )
 
-process_2 = manager.run_external_process('git status')
+manager.display(processes)
 
-manager.display([process_1, process_2])
-
-for index, process in enumerate((process_1, process_2), start=1):
+for index, process in enumerate(processes, start=1):
     print(f"[process_{index}] **outcome** {process.outcome}", flush=True)
 
 manager.close()

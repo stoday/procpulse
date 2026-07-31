@@ -11,6 +11,7 @@ class TerminationReason(str, Enum):
     CANCELLED = "cancelled"
     TIMEOUT = "timeout"
     KILLED = "killed"
+    SKIPPED = "skipped"
 
 
 @dataclass(frozen=True, slots=True)
